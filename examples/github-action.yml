@@ -1,6 +1,8 @@
 # .github/workflows/context-budget.yml
-# Fails the PR when someone adds a skill that clashes with another,
-# or pushes the always-loaded context over budget.
+# On every PR that touches Claude Code config:
+#   - fails on high-severity problems (clashing skills, duplicate names, huge CLAUDE.md)
+#   - fails if the always-loaded context grew by more than 1,500 tokens vs. main
+#   - writes the report, with a before/after diff, to the job summary
 name: Context budget
 on:
   pull_request:
@@ -10,10 +12,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/checkout@v4
         with:
           repository: alialqaisi878-hash/context-budget-guard
           path: .cbg
-      - run: python3 .cbg/skills/context-budget-guard/scripts/cbg.py --project . --fail-on high --max-tokens 20000 --out context-report.md
+      - name: Baseline from the target branch
+        run: |
+          git worktree add ../base "origin/${{ github.base_ref }}"
+          python3 .cbg/skills/context-budget-guard/scripts/cbg.py --project ../base --no-usage --save-baseline base.json --out /dev/null
+      - name: Audit this PR
+        run: |
+          python3 .cbg/skills/context-budget-guard/scripts/cbg.py --project . --no-usage \
+            --compare base.json --max-increase 1500 --fail-on high --out context-report.md
       - if: always()
         run: cat context-report.md >> "$GITHUB_STEP_SUMMARY"
