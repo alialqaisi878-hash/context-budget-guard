@@ -1,0 +1,11 @@
+{
+  "name": "context-budget-guard",
+  "owner": { "name": "Ali" },
+  "plugins": [
+    {
+      "name": "context-budget-guard",
+      "source": "./",
+      "description": "Audit the tokens your Claude Code setup loads before the first message, and find overlapping skills."
+    }
+  ]
+}

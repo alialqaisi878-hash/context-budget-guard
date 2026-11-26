@@ -1,0 +1,19 @@
+# .github/workflows/context-budget.yml
+# Fails the PR when someone adds a skill that clashes with another,
+# or pushes the always-loaded context over budget.
+name: Context budget
+on:
+  pull_request:
+    paths: ["CLAUDE.md", "**/CLAUDE.md", ".claude/**", ".mcp.json"]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: alialqaisi878-hash/context-budget-guard
+          path: .cbg
+      - run: python3 .cbg/skills/context-budget-guard/scripts/cbg.py --project . --fail-on high --max-tokens 20000 --out context-report.md
+      - if: always()
+        run: cat context-report.md >> "$GITHUB_STEP_SUMMARY"

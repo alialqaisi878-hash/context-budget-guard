@@ -1,0 +1,53 @@
+---
+name: context-budget-guard
+description: Audit how many tokens a Claude Code setup loads before the first message (CLAUDE.md, skills, subagents, MCP servers, plugins) and find skills with overlapping triggers. Use when the user hits usage limits fast, asks why context is full, or wants to clean up skills or MCP servers.
+---
+
+# Context Budget Guard
+
+Find what is eating the context window before any work starts, and fix it.
+
+## When to run
+
+- The user says limits run out fast, sessions feel slow, or `/context` looks full.
+- The user installed many skills, plugins or MCP servers and wants a cleanup.
+- A skill "stopped working" or Claude picks the wrong skill (likely overlapping descriptions).
+- Before committing changes to `CLAUDE.md`, `.claude/skills`, `.claude/agents` or `.mcp.json`.
+
+## How to run
+
+Run the bundled script from the project root. It is read-only and uses only the Python standard library.
+
+```bash
+python3 <this skill's directory>/scripts/cbg.py --project . --out context-report.md
+```
+
+Useful flags:
+
+| Flag | Purpose |
+|---|---|
+| `--json` | Machine-readable output |
+| `--similarity 0.35` | Overlap threshold between descriptions (raise to reduce noise) |
+| `--memory-budget 2000` | Token budget for each CLAUDE.md before it is flagged |
+| `--mcp-estimate 4000` | Assumed tokens per MCP server (real cost is only known at runtime) |
+| `--fail-on high` | Exit 1 if any high finding (for CI) |
+| `--max-tokens 20000` | Exit 1 if the always-loaded estimate exceeds this |
+
+## What to do with the report
+
+1. Read `context-report.md`. Lead your answer with the total always-loaded estimate and the top 3 findings by tokens saved.
+2. If MCP servers are listed, suggest the user run `/context` for exact numbers; the script only estimates them.
+3. Offer concrete fixes, and apply them only after the user agrees:
+   - **Big CLAUDE.md**: move the largest reference sections into a new project skill so they load on demand. Keep rules that apply to every task.
+   - **Overlapping skills**: rewrite each description so it names a distinct situation (file type, input, stage of work), or merge the two skills.
+   - **Duplicate names**: rename or remove one copy.
+   - **Unused plugins or MCP servers**: disable them for this project (`/plugin` or `/mcp`, or `disabledMcpjsonServers` in `.claude/settings.json`).
+   - **Long descriptions**: shorten to one or two sentences, about 80 tokens, and move detail into the skill body.
+4. Never delete a user's skill, plugin or CLAUDE.md content without explicit approval. Prefer disabling over deleting.
+5. After fixes, run the script again and report the before/after total.
+
+## Limits
+
+- Token counts are estimates (about ±25%); no tokenizer is bundled.
+- MCP tool schemas are not fetched; each server is counted at a flat estimate.
+- Overlap detection is lexical (TF-IDF on descriptions). It catches shared wording, not every semantic clash.
