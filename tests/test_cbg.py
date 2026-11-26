@@ -213,5 +213,33 @@ class TestBaseline(unittest.TestCase):
         self.assertIn("| new-skill | skill | added |", md)
 
 
+class TestBundleAndEmpty(unittest.TestCase):
+    def test_empty_setup_explains_itself(self):
+        f = Fixture()
+        try:
+            out = Path(f.tmp.name) / "r.md"
+            cbg.main(["--project", str(f.proj), "--home", str(f.home), "--out", str(out)])
+            self.assertIn("Nothing to audit here", out.read_text())
+        finally:
+            f.close()
+
+    def test_bundle_zip_and_unsafe_paths(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as t:
+            z = Path(t) / "cfg.zip"
+            with zipfile.ZipFile(z, "w") as zf:
+                zf.writestr("my-app/CLAUDE.md", "word " * 3000)
+                zf.writestr("my-app/.claude/skills/a/SKILL.md", "---\nname: a\ndescription: Does a.\n---\n")
+                zf.writestr("my-app/.claude/agents/r.md", "---\nname: r\ndescription: Reviews.\n---\n")
+                zf.writestr("../evil.txt", "nope")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                cbg.main(["--bundle", str(z), "--json", "--no-usage"])
+            data = json.loads(buf.getvalue())
+            kinds = sorted(i["kind"] for i in data["items"])
+            self.assertEqual(kinds, ["agent", "memory", "skill"])
+            self.assertFalse((Path(t).parent / "evil.txt").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

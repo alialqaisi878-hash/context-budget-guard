@@ -37,8 +37,18 @@ Useful flags:
 | `--save-baseline cbg-baseline.json` | Save a snapshot before making fixes |
 | `--compare cbg-baseline.json` | Show the before/after diff |
 | `--max-increase 1500` | With `--compare`: exit 1 if tokens grew more than this |
+| `--bundle config.zip` | Audit an uploaded zip of a project and/or `.claude` folder |
 
 Usage counts come from local session transcripts in `~/.claude/projects/`. They never leave the machine. Usage findings need at least 5 sessions in the window (`--min-sessions`).
+
+## Where this runs
+
+- **Claude Code (terminal, desktop, IDE):** the full audit. The script reads `CLAUDE.md`, `.claude/`, `~/.claude/` and `.mcp.json` directly.
+- **claude.ai, Claude apps, Cowork, or any sandbox without the user's config:** the script finds nothing and prints "Nothing to audit here". Do not report a clean bill of health. Instead:
+  1. Tell the user this environment can't see their Claude Code setup.
+  2. Offer two options: install the plugin in Claude Code (`/plugin marketplace add alialqaisi878-hash/context-budget-guard`), or upload a zip containing their project folder and/or their `~/.claude` folder. Remind them to leave out `.credentials.json` and any `.env` files.
+  3. If they upload a zip, run `python3 <this skill's directory>/scripts/cbg.py --bundle <path-to-zip> --no-usage --out context-report.md`. Usage stats need session transcripts, so only include `~/.claude/projects` if they want usage counts (then drop `--no-usage`).
+  4. If they can't upload files, ask them to paste their `CLAUDE.md` and the output of `/context` from Claude Code, and estimate from that by hand (about 4 characters per token).
 
 ## What to do with the report
 

@@ -1,6 +1,6 @@
 {
   "name": "context-budget-guard",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Audit the tokens your Claude Code setup loads before the first message, and find overlapping skills.",
   "author": { "name": "Ali" },
   "license": "MIT",
