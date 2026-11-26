@@ -1,32 +1,32 @@
 # Context Budget Report
 
-Project: `~/my-app`  ·  Context Budget Guard v0.1.0
+Project: `~/my-app`  ·  Context Budget Guard v0.2.0
 
-**Estimated always-loaded context: ~28,201 tokens** (before your first message; excludes Claude Code's own system prompt).
+**Estimated always-loaded context: ~16,201 tokens** (before your first message; excludes Claude Code's own system prompt).
 
 | Source | Count | ~Tokens every session |
 |---|---:|---:|
 | CLAUDE.md / rules | 1 | 8,118 |
 | Skill descriptions | 4 | 65 |
 | Subagent descriptions | 1 | 18 |
-| MCP servers (estimate) | 5 | 20,000 |
+| MCP servers (estimate) | 2 | 8,000 |
+
+Usage: scanned 0 session transcripts from the last 30 days (need 5+ for usage findings).
 
 ## Biggest consumers
 
-| # | Item | Kind | Scope | ~Tokens |
-|---:|---|---|---|---:|
-| 1 | CLAUDE.md | memory | project | 8,118 |
-| 2 | github | mcp | project | 4,000 |
-| 3 | linear | mcp | project | 4,000 |
-| 4 | notion | mcp | project | 4,000 |
-| 5 | sentry | mcp | project | 4,000 |
-| 6 | slack | mcp | project | 4,000 |
-| 7 | pdf-tools | skill | user | 30 |
-| 8 | pdf-reader | skill | user | 18 |
-| 9 | reviewer | agent | project | 18 |
-| 10 | pdf-tools | skill | project | 14 |
+| # | Item | Kind | Scope | ~Tokens | Uses |
+|---:|---|---|---|---:|---:|
+| 1 | CLAUDE.md | memory | project | 8,118 | – |
+| 2 | github | mcp | project | 4,000 | – |
+| 3 | slack | mcp | project | 4,000 | – |
+| 4 | pdf-tools | skill | user | 30 | – |
+| 5 | pdf-reader | skill | user | 18 | – |
+| 6 | reviewer | agent | project | 18 | – |
+| 7 | pdf-tools | skill | project | 14 | – |
+| 8 | commit-msg | skill | user | 3 | – |
 
-## Findings (6)
+## Findings (5)
 
 ### 1. 🔴 CLAUDE.md is ~8118 tokens, loaded every session · saves ~6,118 tokens
 
@@ -48,19 +48,13 @@ Largest sections: 'API reference' (~8106), 'Project rules' (~5).
 
 ### 4. 🔴 'pdf-tools' and 'reviewer' have overlapping triggers (71% similar)
 
-Shared terms: style, pull, request, issue, review, bugs. .claude/skills/review/SKILL.md vs .claude/agents/reviewer.md
+Shared terms: style, issue, review, bugs, pull, request. .claude/skills/review/SKILL.md vs .claude/agents/reviewer.md
 
 **Fix:** Claude may pick the wrong one or silently stop using one. Make each description name a distinct situation (input type, file type, stage of work), or merge them.
 
-### 5. 🟠 5 MCP servers enabled for this project · saves ~10,000 tokens
+### 5. 🟠 'pdf-reader' and 'pdf-tools' have overlapping triggers (52% similar)
 
-Every tool schema from every server is loaded up front. Servers: github, linear, notion, sentry, slack
-
-**Fix:** Disable servers this project does not use (`/mcp` or `disabledMcpjsonServers` in .claude/settings.json), and run `/context` to see their real cost.
-
-### 6. 🟠 'pdf-reader' and 'pdf-tools' have overlapping triggers (52% similar)
-
-Shared terms: pdf, document, file, extract, text, table. ~/.claude/skills/pdf-reader/SKILL.md vs ~/.claude/skills/pdf-tools/SKILL.md
+Shared terms: pdf, file, table, document, extract, text. ~/.claude/skills/pdf-reader/SKILL.md vs ~/.claude/skills/pdf-tools/SKILL.md
 
 **Fix:** Claude may pick the wrong one or silently stop using one. Make each description name a distinct situation (input type, file type, stage of work), or merge them.
 

@@ -19,7 +19,7 @@ from collections import Counter
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 # ---------------------------------------------------------------- tokens
 
@@ -52,6 +52,8 @@ class Item:
     always_tokens: int  # loaded into every session
     ondemand_tokens: int = 0  # loaded only when invoked
     description: str = ""
+    plugin: str = ""
+    uses: int | None = None   # invocations found in session transcripts (None = not measured)
     notes: list = field(default_factory=list)
 
 
@@ -190,7 +192,8 @@ def collect_skills(project: Path, home: Path) -> list[Item]:
             desc = meta.get("description", "")
             it = Item("skill", name, str(sk), scope,
                       always_tokens=est_tokens(f"{name}: {desc}"),
-                      ondemand_tokens=est_tokens(body), description=desc)
+                      ondemand_tokens=est_tokens(body), description=desc,
+                      plugin=plugin_name(sk) if scope == "plugin" else "")
             items.append(it)
     return items
 
@@ -240,6 +243,86 @@ def collect_mcp(project: Path, home: Path, per_server: int) -> list[Item]:
         it.notes.append(("estimated", True))
         items.append(it)
     return items
+
+
+# ---------------------------------------------------------------- usage
+
+_CMD = re.compile(r"<command-name>/?([\w:.-]+)</command-name>")
+
+
+@dataclass
+class Usage:
+    sessions: int = 0
+    days: int = 0
+    skills: Counter = field(default_factory=Counter)
+    agents: Counter = field(default_factory=Counter)
+
+
+def project_slug(project: Path) -> str:
+    """Claude Code stores transcripts under ~/.claude/projects/<path with non-alphanumerics as '-'>."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(project))
+
+
+def _short(name: str) -> str:
+    return name.split(":")[-1].strip().lower()
+
+
+def collect_usage(project: Path, home: Path, days: int, scope: str) -> Usage:
+    """Count Skill and subagent invocations in Claude Code session transcripts (*.jsonl)."""
+    import time
+    root = home / ".claude" / "projects"
+    u = Usage(days=days)
+    if not root.is_dir():
+        return u
+    dirs = [root / project_slug(project)] if scope == "project" else [d for d in root.iterdir() if d.is_dir()]
+    cutoff = time.time() - days * 86400
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for f in d.glob("*.jsonl"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    continue
+                fh = f.open(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            u.sessions += 1
+            with fh:
+                for line in fh:
+                    if '"Skill"' not in line and "command-name" not in line and "subagent_type" not in line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    content = (rec.get("message") or {}).get("content")
+                    if isinstance(content, str):
+                        for m in _CMD.findall(content):
+                            u.skills[_short(m)] += 1
+                        continue
+                    if not isinstance(content, list):
+                        continue
+                    for b in content:
+                        if not isinstance(b, dict):
+                            continue
+                        if b.get("type") == "tool_use":
+                            inp = b.get("input") or {}
+                            if b.get("name") == "Skill" and inp.get("skill"):
+                                u.skills[_short(str(inp["skill"]))] += 1
+                            elif b.get("name") in ("Agent", "Task") and inp.get("subagent_type"):
+                                u.agents[_short(str(inp["subagent_type"]))] += 1
+                        elif b.get("type") == "text":
+                            for m in _CMD.findall(b.get("text") or ""):
+                                u.skills[_short(m)] += 1
+    return u
+
+
+def apply_usage(items: list[Item], u: Usage) -> None:
+    for it in items:
+        if it.kind == "skill":
+            it.uses = u.skills.get(it.name.lower(), 0)
+        elif it.kind == "agent":
+            it.uses = u.agents.get(it.name.lower(), 0)
 
 
 # ---------------------------------------------------------------- overlap
@@ -344,8 +427,43 @@ def analyze(items: list[Item], pairs, args) -> list[Finding]:
                          "Disable servers this project does not use (`/mcp` or `disabledMcpjsonServers` in "
                          ".claude/settings.json), and run `/context` to see their real cost.",
                          sum(m.always_tokens for m in mcps) // 2))
+    f += usage_findings(items, args)
     order = {"high": 0, "medium": 1, "low": 2}
     return sorted(f, key=lambda x: (order[x.severity], -x.tokens_at_stake))
+
+
+def usage_findings(items: list[Item], args) -> list[Finding]:
+    u: Usage | None = getattr(args, "_usage", None)
+    if not u or u.sessions < args.min_sessions:
+        return []
+    f: list[Finding] = []
+    span = f"{u.sessions} session{'s' if u.sessions != 1 else ''} over the last {u.days} days"
+    # Whole plugins that were never used: the biggest, simplest win.
+    by_plugin: dict[str, list[Item]] = {}
+    for it in items:
+        if it.kind == "skill" and it.plugin:
+            by_plugin.setdefault(it.plugin, []).append(it)
+    idle_plugins = set()
+    for name, sk in by_plugin.items():
+        if all((i.uses or 0) == 0 for i in sk):
+            idle_plugins.add(name)
+            tok = sum(i.always_tokens for i in sk)
+            f.append(Finding("high" if tok >= 2000 else "medium",
+                             f"Plugin '{name}' was never used ({len(sk)} skills, ~{tok:,} tokens)",
+                             f"None of its skills were invoked in {span}.",
+                             f"Disable it with `/plugin` (or uninstall it) unless you need it; re-enable any time.", tok))
+    idle = [i for i in items if i.kind in ("skill", "agent") and i.uses == 0 and i.plugin not in idle_plugins]
+    if idle:
+        idle.sort(key=lambda i: -i.always_tokens)
+        shown = ", ".join(f"{i.name} (~{i.always_tokens})" for i in idle[:10])
+        more = f" and {len(idle) - 10} more" if len(idle) > 10 else ""
+        tok = sum(i.always_tokens for i in idle)
+        f.append(Finding("medium" if tok >= 1000 else "low",
+                         f"{len(idle)} skills/agents were never used (~{tok:,} tokens)",
+                         f"Not invoked in {span}: {shown}{more}.",
+                         "Remove the ones you don't need, or move project-specific ones into that project's "
+                         ".claude/skills so they stop loading everywhere.", tok))
+    return f
 
 
 # ---------------------------------------------------------------- report
@@ -385,8 +503,8 @@ def render_md(project: Path, items: list[Item], findings: list[Finding], args) -
     plugins = Counter()
     pcount = Counter()
     for i in items:
-        if i.scope == "plugin":
-            name = plugin_name(Path(i.path))
+        if i.plugin:
+            name = i.plugin
             plugins[name] += i.always_tokens
             pcount[name] += 1
     if plugins:
@@ -394,9 +512,15 @@ def render_md(project: Path, items: list[Item], findings: list[Finding], args) -
               "| Plugin | Skills | ~Tokens every session |", "|---|---:|---:|"]
         for name, tok in plugins.most_common():
             L.append(f"| {name} | {pcount[name]} | {tok:,} |")
-    L += ["", "## Biggest consumers", "", "| # | Item | Kind | Scope | ~Tokens |", "|---:|---|---|---|---:|"]
+    u: Usage | None = getattr(args, "_usage", None)
+    measured = bool(u and u.sessions >= args.min_sessions)
+    if u:
+        L += ["", f"Usage: scanned {u.sessions} session transcripts from the last {u.days} days"
+              + ("." if measured else f" (need {args.min_sessions}+ for usage findings).")]
+    L += ["", "## Biggest consumers", "", "| # | Item | Kind | Scope | ~Tokens | Uses |", "|---:|---|---|---|---:|---:|"]
     for n, it in enumerate(sorted(items, key=lambda i: -i.always_tokens)[: args.top], 1):
-        L.append(f"| {n} | {it.name} | {it.kind} | {it.scope} | {it.always_tokens:,} |")
+        uses = str(it.uses) if (measured and it.uses is not None) else "–"
+        L.append(f"| {n} | {it.name} | {it.kind} | {it.scope} | {it.always_tokens:,} | {uses} |")
     L += ["", f"## Findings ({len(findings)})", ""]
     if not findings:
         L.append("No problems found. Nice and lean.")
@@ -408,6 +532,46 @@ def render_md(project: Path, items: list[Item], findings: list[Finding], args) -
           f"Token counts are estimates (±25%). MCP servers are counted at ~{args.mcp_estimate:,} tokens each "
           "because their tool schemas are only known at runtime; run `/context` inside Claude Code for exact numbers."]
     return "\n".join(L)
+
+
+# ---------------------------------------------------------------- baseline
+
+
+def snapshot(project: Path, items: list[Item], findings: list[Finding]) -> dict:
+    return {"version": VERSION, "project": str(project),
+            "always_loaded_tokens": sum(i.always_tokens for i in items),
+            "items": {f"{i.kind}:{i.scope}:{i.name}": i.always_tokens for i in items},
+            "findings": sorted({f.title for f in findings if f.severity != "low"})}
+
+
+def render_diff(base: dict, cur: dict) -> tuple[str, int]:
+    delta = cur["always_loaded_tokens"] - base["always_loaded_tokens"]
+    sign = "+" if delta > 0 else ""
+    L = ["## Change since baseline", "",
+         f"**{base['always_loaded_tokens']:,} → {cur['always_loaded_tokens']:,} tokens ({sign}{delta:,})**", ""]
+    bi, ci = base.get("items", {}), cur["items"]
+    rows = []
+    for k in sorted(set(bi) | set(ci)):
+        a, b = bi.get(k), ci.get(k)
+        if a == b:
+            continue
+        kind, _, name = k.split(":", 2)
+        status = "added" if a is None else "removed" if b is None else "changed"
+        d = (b or 0) - (a or 0)
+        rows.append((abs(d), f"| {name} | {kind} | {status} | {'+' if d > 0 else ''}{d:,} |"))
+    if rows:
+        L += ["| Item | Kind | Change | Δ Tokens |", "|---|---|---|---:|"]
+        L += [r for _, r in sorted(rows, key=lambda r: -r[0])[:25]]
+        L.append("")
+    new = [t for t in cur["findings"] if t not in set(base.get("findings", []))]
+    fixed = [t for t in base.get("findings", []) if t not in set(cur["findings"])]
+    if new:
+        L += ["**New problems:**", *[f"- {t}" for t in new], ""]
+    if fixed:
+        L += ["**Fixed:**", *[f"- {t}" for t in fixed], ""]
+    if not rows and not new and not fixed:
+        L += ["No changes.", ""]
+    return "\n".join(L), delta
 
 
 # ---------------------------------------------------------------- main
@@ -427,6 +591,15 @@ def main(argv=None) -> int:
     ap.add_argument("--fail-on", choices=["high", "medium", "low", "never"], default="never",
                     help="exit 1 if any finding at or above this severity (for CI)")
     ap.add_argument("--max-tokens", type=int, default=0, help="exit 1 if always-loaded estimate exceeds this")
+    ap.add_argument("--no-usage", action="store_true", help="skip scanning session transcripts")
+    ap.add_argument("--usage-days", type=int, default=30, help="transcript window in days (default 30)")
+    ap.add_argument("--usage-scope", choices=["all", "project"], default="all",
+                    help="count usage across all projects (default) or only this one")
+    ap.add_argument("--min-sessions", type=int, default=5, help="sessions needed before flagging unused items")
+    ap.add_argument("--save-baseline", metavar="FILE", help="save a snapshot to compare against later")
+    ap.add_argument("--compare", metavar="FILE", help="show changes since a saved baseline")
+    ap.add_argument("--max-increase", type=int, default=0,
+                    help="with --compare: exit 1 if always-loaded tokens grew by more than this")
     ap.add_argument("--version", action="version", version=VERSION)
     args = ap.parse_args(argv)
 
@@ -434,16 +607,36 @@ def main(argv=None) -> int:
     home = Path(args.home).expanduser().resolve()
     items = (collect_memory(project, home) + collect_skills(project, home)
              + collect_agents(project, home) + collect_mcp(project, home, args.mcp_estimate))
+    args._usage = None
+    if not args.no_usage:
+        args._usage = collect_usage(project, home, args.usage_days, args.usage_scope)
+        apply_usage(items, args._usage)
     pairs = overlaps([i for i in items if i.kind in ("skill", "agent")], args.similarity)
     findings = analyze(items, pairs, args)
     total = sum(i.always_tokens for i in items)
+    snap = snapshot(project, items, findings)
+    diff_md, delta = "", 0
+    if args.compare:
+        base = _load_json(Path(args.compare))
+        if base:
+            diff_md, delta = render_diff(base, snap)
+        else:
+            print(f"warning: could not read baseline {args.compare}", file=sys.stderr)
+    if args.save_baseline:
+        Path(args.save_baseline).write_text(json.dumps(snap, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     if args.json:
         out = json.dumps({"version": VERSION, "project": str(project), "always_loaded_tokens": total,
                           "items": [{k: v for k, v in asdict(i).items() if k != "notes"} for i in items],
-                          "findings": [asdict(f) for f in findings]}, indent=2, ensure_ascii=False)
+                          "findings": [asdict(f) for f in findings],
+                          "usage": ({"sessions": args._usage.sessions, "days": args._usage.days}
+                                    if args._usage else None),
+                          "delta_tokens": delta if args.compare else None}, indent=2, ensure_ascii=False)
     else:
         out = render_md(project, items, findings, args)
+        if diff_md:
+            head, sep, rest = out.partition("\n## ")
+            out = head + diff_md + sep + rest
         out = out.replace(str(project) + os.sep, "").replace(str(home) + os.sep, "~/")
     if args.out:
         Path(args.out).write_text(out + "\n", encoding="utf-8")
@@ -454,6 +647,8 @@ def main(argv=None) -> int:
     if args.fail_on != "never" and any(rank[f.severity] <= rank[args.fail_on] for f in findings):
         return 1
     if args.max_tokens and total > args.max_tokens:
+        return 1
+    if args.compare and args.max_increase and delta > args.max_increase:
         return 1
     return 0
 
