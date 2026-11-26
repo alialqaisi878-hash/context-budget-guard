@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- **Works on claude.ai and Claude apps.** When no Claude Code config is visible, the report explains why instead of showing an empty "all clear", and the skill walks the user through uploading a zip.
+- `--bundle ZIP` audits an uploaded zip of a project and/or `.claude` folder (unsafe paths are skipped).
+- Uploadable skill zip for claude.ai in `dist/`.
+- Plugin icon and marketplace description; passes `claude plugin validate --strict`.
+
 ## 0.2.0
 
 - **Usage stats.** Reads Claude Code session transcripts (`~/.claude/projects/*.jsonl`) to count how often each skill and subagent is actually invoked. Flags whole plugins and individual skills that were never used in the last 30 days, with the tokens you'd save. New flags: `--no-usage`, `--usage-days`, `--usage-scope`, `--min-sessions`.

@@ -19,7 +19,7 @@ from collections import Counter
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 # ---------------------------------------------------------------- tokens
 
@@ -132,7 +132,7 @@ def collect_memory(project: Path, home: Path) -> list[Item]:
     # Claude Code walks up from cwd loading CLAUDE.md files.
     chain = [project, *project.parents]
     for d in reversed(chain):
-        if d == home or d == home.parent:
+        if project != home and (d == home or d == home.parent):
             continue
         for name in ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"):
             candidates.append((d / name, "local" if name.endswith("local.md") else "project"))
@@ -200,10 +200,14 @@ def collect_skills(project: Path, home: Path) -> list[Item]:
 
 def collect_agents(project: Path, home: Path) -> list[Item]:
     items = []
+    seen = set()
     for base, scope in ((home / ".claude" / "agents", "user"), (project / ".claude" / "agents", "project")):
         if not base.is_dir():
             continue
         for f in sorted(base.glob("*.md")):
+            if f.resolve() in seen:
+                continue
+            seen.add(f.resolve())
             meta, body = split_frontmatter(read(f))
             name = meta.get("name") or f.stem
             desc = meta.get("description", "")
@@ -521,6 +525,9 @@ def render_md(project: Path, items: list[Item], findings: list[Finding], args) -
     for n, it in enumerate(sorted(items, key=lambda i: -i.always_tokens)[: args.top], 1):
         uses = str(it.uses) if (measured and it.uses is not None) else "–"
         L.append(f"| {n} | {it.name} | {it.kind} | {it.scope} | {it.always_tokens:,} | {uses} |")
+    if not items:
+        L += ["", EMPTY_NOTE]
+        return "\n".join(L)
     L += ["", f"## Findings ({len(findings)})", ""]
     if not findings:
         L.append("No problems found. Nice and lean.")
@@ -574,6 +581,48 @@ def render_diff(base: dict, cur: dict) -> tuple[str, int]:
     return "\n".join(L), delta
 
 
+# ---------------------------------------------------------------- bundles
+
+
+def extract_bundle(zip_path: Path) -> Path:
+    """Unpack a zip of Claude Code config (e.g. a project folder and/or a .claude folder)
+    into a temp dir, refusing absolute paths and '..' entries. Returns the root that
+    holds the files: the single top-level folder if there is one, else the temp dir."""
+    import tempfile
+    import zipfile
+    out = Path(tempfile.mkdtemp(prefix="cbg-"))
+    with zipfile.ZipFile(zip_path) as z:
+        for m in z.infolist():
+            name = m.filename.replace("\\", "/")
+            if name.startswith("/") or ".." in Path(name).parts:
+                continue
+            target = out / name
+            if m.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(m) as src, open(target, "wb") as dst:
+                dst.write(src.read())
+    tops = [p for p in out.iterdir() if not p.name.startswith("__MACOSX")]
+    if len(tops) == 1 and tops[0].is_dir() and tops[0].name != ".claude":
+        return tops[0]
+    return out
+
+
+EMPTY_NOTE = """## Nothing to audit here
+
+No Claude Code configuration was found (no CLAUDE.md, skills, subagents, plugins or MCP servers).
+This is expected when the skill runs on claude.ai or in a fresh sandbox, where your local
+`~/.claude` folder is not available.
+
+To audit your setup, either:
+
+1. Run the skill inside Claude Code on your own machine (`/plugin install context-budget-guard@context-budget-guard`), or
+2. Upload a zip of your project folder and your `~/.claude` folder (without `.credentials.json`)
+   and run with `--bundle your.zip`.
+"""
+
+
 # ---------------------------------------------------------------- main
 
 
@@ -600,11 +649,16 @@ def main(argv=None) -> int:
     ap.add_argument("--compare", metavar="FILE", help="show changes since a saved baseline")
     ap.add_argument("--max-increase", type=int, default=0,
                     help="with --compare: exit 1 if always-loaded tokens grew by more than this")
+    ap.add_argument("--bundle", metavar="ZIP",
+                    help="audit an uploaded zip of a project and/or .claude folder (for claude.ai)")
     ap.add_argument("--version", action="version", version=VERSION)
     args = ap.parse_args(argv)
 
     project = Path(args.project).expanduser().resolve()
     home = Path(args.home).expanduser().resolve()
+    if args.bundle:
+        root = extract_bundle(Path(args.bundle))
+        project = home = root.resolve()
     items = (collect_memory(project, home) + collect_skills(project, home)
              + collect_agents(project, home) + collect_mcp(project, home, args.mcp_estimate))
     args._usage = None

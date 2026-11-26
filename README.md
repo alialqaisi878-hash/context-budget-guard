@@ -28,6 +28,12 @@ As a Claude Code plugin:
 
 Or as a plain skill: copy `skills/context-budget-guard/` into `~/.claude/skills/` (all projects) or `.claude/skills/` (one project).
 
+### On claude.ai / Claude apps
+
+Download `context-budget-guard-skill.zip` from the [latest release files](dist/), then go to **Customize → Skills → + → Upload a skill** on claude.ai (code execution must be on in Settings → Capabilities).
+
+claude.ai can't see your local Claude Code setup, so there the skill asks you to upload a zip of your project and/or `~/.claude` folder (leave out `.credentials.json` and `.env`), and audits that with `--bundle`.
+
 ## Use
 
 Ask Claude: *"Why is my context so full?"* or *"Audit my skills for conflicts."* The skill runs the audit and walks you through fixes.

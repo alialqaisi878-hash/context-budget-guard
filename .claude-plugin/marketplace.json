@@ -1,6 +1,11 @@
 {
   "name": "context-budget-guard",
-  "owner": { "name": "Ali" },
+  "owner": {
+    "name": "Ali"
+  },
+  "metadata": {
+    "description": "Context Budget Guard: audit what Claude Code loads before your first message."
+  },
   "plugins": [
     {
       "name": "context-budget-guard",
