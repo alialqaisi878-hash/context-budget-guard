@@ -32,7 +32,7 @@ Or as a plain skill: copy `skills/context-budget-guard/` into `~/.claude/skills/
 
 Ask Claude: *"Why is my context so full?"* or *"Audit my skills for conflicts."* The skill runs the audit and walks you through fixes.
 
-Or run the script directly (Python 3.9+, no packages):
+Or run the script directly (Python 3.10+, no packages):
 
 ```bash
 python3 skills/context-budget-guard/scripts/cbg.py --project . --out context-report.md

@@ -6,7 +6,7 @@
 - **Baselines.** `--save-baseline FILE` and `--compare FILE` show a before/after diff: total tokens, items added/removed/changed, new and fixed problems. `--max-increase N` fails CI when a change grows the context by more than N tokens.
 - New "Uses" column in the biggest-consumers table.
 - The CI example now compares each PR against its target branch.
-- Test suite (18 tests) and GitHub Actions on Python 3.9, 3.12 and 3.13.
+- Test suite (18 tests) and GitHub Actions on Python 3.10, 3.12 and 3.13.
 
 ## 0.1.0
 
