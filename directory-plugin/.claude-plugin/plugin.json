@@ -1,0 +1,22 @@
+{
+  "name": "context-budget-guard",
+  "displayName": "Context Budget Guard",
+  "version": "1.0.0",
+  "description": "Audit what Claude Code loads before your first message, estimate the token cost, and find overlapping, duplicate or never-used skills.",
+  "author": {
+    "name": "Ali Alqaisi",
+    "url": "https://github.com/alialqaisi878-hash"
+  },
+  "homepage": "https://github.com/alialqaisi878-hash/context-budget-guard",
+  "repository": "https://github.com/alialqaisi878-hash/context-budget-guard",
+  "license": "MIT",
+  "keywords": [
+    "context",
+    "tokens",
+    "usage-limits",
+    "skills",
+    "plugins",
+    "mcp",
+    "audit"
+  ]
+}
