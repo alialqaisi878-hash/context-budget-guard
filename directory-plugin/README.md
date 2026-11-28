@@ -14,4 +14,6 @@ Then ask Claude: "Why is my Claude Code context so full?"
 
 This edition ships no scripts. For CI checks, baselines and exact usage counts, use the command-line version in the main repository.
 
+Privacy: see [PRIVACY.md](PRIVACY.md). No data leaves your machine.
+
 License: MIT
